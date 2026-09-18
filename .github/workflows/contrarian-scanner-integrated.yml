@@ -1,0 +1,64 @@
+name: Contrarian Scanner (AEX / Dow / Nasdaq / Bitvavo)
+
+on:
+  schedule:
+    # Draait dagelijks om 08:00 Nederlandse tijd. Bitvavo (crypto) wordt
+    # altijd verwerkt; AEX/Dow/Nasdaq worden automatisch overgeslagen op
+    # dagen dat die beurs dicht is (weekend/feestdag) — de scan als geheel
+    # loopt gewoon door. GitHub Actions cron draait altijd in vaste UTC-tijd
+    # en kent geen 'timezone'-veld, dus we registreren twee schema's
+    # (zomer/winter) en laten de workflow zelf bepalen welke moet doorlopen.
+    - cron: '0 6 * * *'   # 08:00 CEST (zomertijd, UTC+2)
+    - cron: '0 7 * * *'   # 08:00 CET  (wintertijd, UTC+1)
+  workflow_dispatch:
+
+jobs:
+  run-scanner:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check of dit schema past bij de huidige tijdzone
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          HUIDIGE_OFFSET=$(TZ='Europe/Amsterdam' date +%z)
+
+          if [ "${{ github.event.schedule }}" = "0 6 * * *" ] && [ "$HUIDIGE_OFFSET" != "+0200" ]; then
+            echo "Zomertijd-schema geactiveerd, maar het is momenteel geen zomertijd. Overslaan."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "0 7 * * *" ] && [ "$HUIDIGE_OFFSET" != "+0100" ]; then
+            echo "Wintertijd-schema geactiveerd, maar het is momenteel geen wintertijd. Overslaan."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Schema komt overeen met de huidige tijdzone. Doorgaan."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Code ophalen
+        uses: actions/checkout@v4
+        if: steps.check.outputs.skip != 'true'
+
+      - name: Python instellen
+        uses: actions/setup-python@v5
+        if: steps.check.outputs.skip != 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Bibliotheken installeren
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Scanner uitvoeren
+        if: steps.check.outputs.skip != 'true'
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+          SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
+          RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
+        run: python contrarian_scanner_integrated.py
