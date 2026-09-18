@@ -1,5 +1,0 @@
-yfinance
-pandas
-pandas_market_calendars
-requests
-python-docx
